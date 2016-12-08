@@ -1,4 +1,4 @@
--- An audit history is important on most tables. Provide an audit trigger that logs to
+﻿-- An audit history is important on most tables. Provide an audit trigger that logs to
 -- a dedicated audit table for the major relations.
 --
 -- This file should be generic and not depend on application roles or structures,
@@ -36,6 +36,8 @@ COMMENT ON SCHEMA audit IS 'Out-of-table audit/history logging tables and trigge
 -- you're interested in, into a temporary table where you CREATE any useful
 -- indexes and do your analysis.
 --
+DROP TABLE IF EXISTS audit.logged_actions;
+
 CREATE TABLE audit.logged_actions (
     event_id bigserial primary key,
     schema_name text not null,
@@ -49,7 +51,7 @@ CREATE TABLE audit.logged_actions (
     application_name text,
     client_addr inet,
     client_port integer,
-    client_query text,
+    client_query text NOT NULL,
     action char(1) NOT NULL CHECK (action IN ('I','D','U', 'T')),
     row_data hstore,
     changed_fields hstore,
@@ -81,6 +83,16 @@ CREATE INDEX logged_actions_relid_idx ON audit.logged_actions(relid);
 CREATE INDEX logged_actions_action_tstamp_tx_stm_idx ON audit.logged_actions(action_tstamp_stm);
 CREATE INDEX logged_actions_action_idx ON audit.logged_actions(action);
 
+CREATE TABLE audit.logged_relations (
+    relation_name text not null,
+    uid_column text not null,
+    PRIMARY KEY (relation_name, uid_column)
+);
+
+COMMENT ON TABLE audit.logged_relations IS 'Table used to store unique identifier columns for table or views, so that events can be replayed';
+COMMENT ON COLUMN audit.logged_relations.relation_name IS 'Relation (table or view) name (with schema if needed)';
+COMMENT ON COLUMN audit.logged_relations.uid_column IS 'Name of a column that is used to uniquely identify a row in the relation';
+
 CREATE OR REPLACE FUNCTION audit.if_modified_func() RETURNS TRIGGER AS $body$
 DECLARE
     audit_row audit.logged_actions;
@@ -90,7 +102,9 @@ DECLARE
     h_new hstore;
     excluded_cols text[] = ARRAY[]::text[];
 BEGIN
-    IF TG_WHEN <> 'AFTER' THEN
+    --RAISE WARNING '[audit.if_modified_func] start with TG_ARGV[0]: % ; TG_ARGV[1] : %, TG_OP: %, TG_LEVEL : %, TG_WHEN: % ', TG_ARGV[0], TG_ARGV[1], TG_OP, TG_LEVEL, TG_WHEN;
+
+    IF NOT (TG_WHEN IN ('AFTER' , 'INSTEAD OF')) THEN
         RAISE EXCEPTION 'audit.if_modified_func() may only run as an AFTER trigger';
     END IF;
 
@@ -104,7 +118,7 @@ BEGIN
         statement_timestamp(),                        -- action_tstamp_stm
         clock_timestamp(),                            -- action_tstamp_clk
         txid_current(),                               -- transaction ID
-        current_setting('application_name'),          -- client application
+        (SELECT setting FROM pg_settings WHERE name = 'application_name'),
         inet_client_addr(),                           -- client_addr
         inet_client_port(),                           -- client_port
         current_query(),                              -- top-level query or queries (if multistatement) from client
@@ -115,18 +129,26 @@ BEGIN
 
     IF NOT TG_ARGV[0]::boolean IS DISTINCT FROM 'f'::boolean THEN
         audit_row.client_query = NULL;
+        --RAISE WARNING '[audit.if_modified_func] - Trigger func triggered with no client_query tracking';
+
     END IF;
 
     IF TG_ARGV[1] IS NOT NULL THEN
         excluded_cols = TG_ARGV[1]::text[];
+        --RAISE WARNING '[audit.if_modified_func] - Trigger func triggered with excluded_cols: %',TG_ARGV[1];
+
     END IF;
     
     IF (TG_OP = 'UPDATE' AND TG_LEVEL = 'ROW') THEN
-        audit_row.row_data = hstore(OLD.*) - excluded_cols;
-        audit_row.changed_fields =  (hstore(NEW.*) - audit_row.row_data) - excluded_cols;
+        h_old = hstore(OLD.*) - excluded_cols;
+        audit_row.row_data = h_old;
+	h_new = hstore(NEW.*)- excluded_cols;
+	audit_row.changed_fields =  h_new - h_old;
+
         IF audit_row.changed_fields = hstore('') THEN
             -- All changed fields are ignored. Skip this update.
-            RETURN NULL;
+            RAISE WARNING '[audit.if_modified_func] - Trigger detected NULL hstore. ending';
+            RETURN NEW;
         END IF;
     ELSIF (TG_OP = 'DELETE' AND TG_LEVEL = 'ROW') THEN
         audit_row.row_data = hstore(OLD.*) - excluded_cols;
@@ -136,10 +158,10 @@ BEGIN
         audit_row.statement_only = 't';
     ELSE
         RAISE EXCEPTION '[audit.if_modified_func] - Trigger func added as trigger for unhandled case: %, %',TG_OP, TG_LEVEL;
-        RETURN NULL;
+        RETURN NEW;
     END IF;
     INSERT INTO audit.logged_actions VALUES (audit_row.*);
-    RETURN NULL;
+    RETURN NEW;
 END;
 $body$
 LANGUAGE plpgsql
@@ -186,15 +208,17 @@ DECLARE
   _q_txt text;
   _ignored_cols_snip text = '';
 BEGIN
+
     EXECUTE 'DROP TRIGGER IF EXISTS audit_trigger_row ON ' || target_table::TEXT;
     EXECUTE 'DROP TRIGGER IF EXISTS audit_trigger_stm ON ' || target_table::TEXT;
+
 
     IF audit_rows THEN
         IF array_length(ignored_cols,1) > 0 THEN
             _ignored_cols_snip = ', ' || quote_literal(ignored_cols);
         END IF;
         _q_txt = 'CREATE TRIGGER audit_trigger_row AFTER INSERT OR UPDATE OR DELETE ON ' || 
-                 target_table::TEXT ||
+                 target_table::TEXT || 
                  ' FOR EACH ROW EXECUTE PROCEDURE audit.if_modified_func(' ||
                  quote_literal(audit_query_text) || _ignored_cols_snip || ');';
         RAISE NOTICE '%',_q_txt;
@@ -210,6 +234,15 @@ BEGIN
     RAISE NOTICE '%',_q_txt;
     EXECUTE _q_txt;
 
+    -- store primary key names
+    insert into audit.logged_relations (relation_name, uid_column)
+         select target_table, a.attname
+           from pg_index i
+           join pg_attribute a on a.attrelid = i.indrelid
+                              and a.attnum = any(i.indkey)
+          where i.indrelid = target_table::regclass
+            and i.indisprimary
+            ;
 END;
 $body$
 language 'plpgsql';
@@ -240,6 +273,7 @@ COMMENT ON FUNCTION audit.audit_table(regclass) IS $body$
 Add auditing support to the given table. Row-level changes will be logged with full client query text. No cols are ignored.
 $body$;
 
+
 CREATE OR REPLACE FUNCTION audit.replay_event(pevent_id int) RETURNS void AS $body$
 DECLARE
   query text;
@@ -250,12 +284,9 @@ BEGIN
     )
     -- get primary key names
     , where_pks as (
-        select array_to_string(array_agg(a.attname || '=' || quote_literal(row_data->a.attname)), ' AND ') as where_clause
-          from pg_index i
-          join pg_attribute a on a.attrelid = i.indrelid
-                             and a.attnum = any(i.indkey)
-          join event on i.indrelid = (schema_name || '.' || table_name)::regclass
-          where         i.indisprimary
+        select array_to_string(array_agg(uid_column || '=' || quote_literal(row_data->uid_column)), ' AND ') as where_clause
+          from audit.logged_relations r
+          join event on relation_name = (schema_name || '.' || table_name)
     )
     select into query
         case
@@ -284,5 +315,54 @@ COMMENT ON FUNCTION audit.replay_event(int) IS $body$
 Replay a logged event.
  
 Arguments:
-   pevent_id:  The event_id of the event in logged_actions to replay
+   pevent_id:  The event_id of the event in audit.logged_actions to replay
 $body$;
+
+CREATE OR REPLACE FUNCTION audit.audit_view(target_view regclass, audit_query_text BOOLEAN, ignored_cols text[], uid_cols text[]) RETURNS void AS $body$
+DECLARE
+  stm_targets text = 'INSERT OR UPDATE OR DELETE';
+  _q_txt text;
+  _ignored_cols_snip text = '';
+
+BEGIN
+    EXECUTE 'DROP TRIGGER IF EXISTS audit_trigger_row ON ' || target_view::text;
+    EXECUTE 'DROP TRIGGER IF EXISTS audit_trigger_stm ON ' || target_view::text;
+ 
+	IF array_length(ignored_cols,1) > 0 THEN
+	    _ignored_cols_snip = ', ' || quote_literal(ignored_cols);
+	END IF;
+	_q_txt = 'CREATE TRIGGER audit_trigger_row INSTEAD OF INSERT OR UPDATE OR DELETE ON ' || 
+		 target_view::TEXT || 
+		 ' FOR EACH ROW EXECUTE PROCEDURE audit.if_modified_func(' ||
+		 quote_literal(audit_query_text) || _ignored_cols_snip || ');';
+	RAISE NOTICE '%',_q_txt;
+	EXECUTE _q_txt;
+
+    -- store uid columns
+    insert into audit.logged_relations (relation_name, uid_column)
+         select target_view, unnest(uid_cols);
+END;
+$body$
+LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION audit.audit_view(regclass, BOOLEAN, text[], text[]) IS $body$
+ADD auditing support TO a VIEW.
+ 
+Arguments:
+   target_view:      TABLE name, schema qualified IF NOT ON search_path
+   audit_query_text: Record the text of the client query that triggered the audit event?
+   ignored_cols:     COLUMNS TO exclude FROM UPDATE diffs, IGNORE updates that CHANGE only ignored cols.
+   uid_cols:         COLUMNS to use to uniquely identify a row from the view (in order to replay UPDATE and DELETE)
+$body$;
+ 
+-- Pg doesn't allow variadic calls with 0 params, so provide a wrapper
+CREATE OR REPLACE FUNCTION audit.audit_view(target_view regclass, audit_query_text BOOLEAN, uid_cols text[]) RETURNS void AS $body$
+SELECT audit.audit_view($1, $2, ARRAY[]::text[], uid_cols);
+$body$ LANGUAGE SQL;
+ 
+-- And provide a convenience call wrapper for the simplest case
+-- of row-level logging with no excluded cols and query logging enabled.
+--
+CREATE OR REPLACE FUNCTION audit.audit_view(target_view regclass, uid_cols text[]) RETURNS void AS $$
+SELECT audit.audit_view($1, BOOLEAN 't', uid_cols);
+$$ LANGUAGE 'sql';
