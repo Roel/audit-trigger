@@ -36,7 +36,6 @@ COMMENT ON SCHEMA audit IS 'Out-of-table audit/history logging tables and trigge
 -- you're interested in, into a temporary table where you CREATE any useful
 -- indexes and do your analysis.
 --
-DROP TABLE IF EXISTS audit.logged_actions;
 
 CREATE TABLE audit.logged_actions (
     event_id bigserial primary key,
