@@ -14,10 +14,10 @@
 
 CREATE EXTENSION IF NOT EXISTS hstore;
 
-CREATE SCHEMA audit;
-REVOKE ALL ON SCHEMA audit FROM public;
+CREATE SCHEMA historiek;
+REVOKE ALL ON SCHEMA historiek FROM public;
 
-COMMENT ON SCHEMA audit IS 'Out-of-table audit/history logging tables and trigger functions';
+COMMENT ON SCHEMA historiek IS 'Out-of-table audit/history logging tables and trigger functions';
 
 --
 -- Audited data. Lots of information is available, it's just a matter of how much
@@ -37,7 +37,7 @@ COMMENT ON SCHEMA audit IS 'Out-of-table audit/history logging tables and trigge
 -- indexes and do your analysis.
 --
 
-CREATE TABLE audit.logged_actions (
+CREATE TABLE historiek.logged_actions (
     event_id bigserial primary key,
     schema_name text not null,
     table_name text not null,
@@ -57,44 +57,44 @@ CREATE TABLE audit.logged_actions (
     statement_only boolean not null
 );
 
-REVOKE ALL ON audit.logged_actions FROM public;
+REVOKE ALL ON historiek.logged_actions FROM public;
 
-COMMENT ON TABLE audit.logged_actions IS 'History of auditable actions on audited tables, from audit.if_modified_func()';
-COMMENT ON COLUMN audit.logged_actions.event_id IS 'Unique identifier for each auditable event';
-COMMENT ON COLUMN audit.logged_actions.schema_name IS 'Database schema audited table for this event is in';
-COMMENT ON COLUMN audit.logged_actions.table_name IS 'Non-schema-qualified table name of table event occured in';
-COMMENT ON COLUMN audit.logged_actions.relid IS 'Table OID. Changes with drop/create. Get with ''tablename''::regclass';
-COMMENT ON COLUMN audit.logged_actions.session_user_name IS 'Login / session user whose statement caused the audited event';
-COMMENT ON COLUMN audit.logged_actions.action_tstamp_tx IS 'Transaction start timestamp for tx in which audited event occurred';
-COMMENT ON COLUMN audit.logged_actions.action_tstamp_stm IS 'Statement start timestamp for tx in which audited event occurred';
-COMMENT ON COLUMN audit.logged_actions.action_tstamp_clk IS 'Wall clock time at which audited event''s trigger call occurred';
-COMMENT ON COLUMN audit.logged_actions.transaction_id IS 'Identifier of transaction that made the change. May wrap, but unique paired with action_tstamp_tx.';
-COMMENT ON COLUMN audit.logged_actions.client_addr IS 'IP address of client that issued query. Null for unix domain socket.';
-COMMENT ON COLUMN audit.logged_actions.client_port IS 'Remote peer IP port address of client that issued query. Undefined for unix socket.';
-COMMENT ON COLUMN audit.logged_actions.client_query IS 'Top-level query that caused this auditable event. May be more than one statement.';
-COMMENT ON COLUMN audit.logged_actions.application_name IS 'Application name set when this audit event occurred. Can be changed in-session by client.';
-COMMENT ON COLUMN audit.logged_actions.action IS 'Action type; I = insert, D = delete, U = update, T = truncate';
-COMMENT ON COLUMN audit.logged_actions.row_data IS 'Record value. Null for statement-level trigger. For INSERT this is the new tuple. For DELETE and UPDATE it is the old tuple.';
-COMMENT ON COLUMN audit.logged_actions.changed_fields IS 'New values of fields changed by UPDATE. Null except for row-level UPDATE events.';
-COMMENT ON COLUMN audit.logged_actions.statement_only IS '''t'' if audit event is from an FOR EACH STATEMENT trigger, ''f'' for FOR EACH ROW';
+COMMENT ON TABLE historiek.logged_actions IS 'History of auditable actions on audited tables, from audit.if_modified_func()';
+COMMENT ON COLUMN historiek.logged_actions.event_id IS 'Unique identifier for each auditable event';
+COMMENT ON COLUMN historiek.logged_actions.schema_name IS 'Database schema audited table for this event is in';
+COMMENT ON COLUMN historiek.logged_actions.table_name IS 'Non-schema-qualified table name of table event occured in';
+COMMENT ON COLUMN historiek.logged_actions.relid IS 'Table OID. Changes with drop/create. Get with ''tablename''::regclass';
+COMMENT ON COLUMN historiek.logged_actions.session_user_name IS 'Login / session user whose statement caused the audited event';
+COMMENT ON COLUMN historiek.logged_actions.action_tstamp_tx IS 'Transaction start timestamp for tx in which audited event occurred';
+COMMENT ON COLUMN historiek.logged_actions.action_tstamp_stm IS 'Statement start timestamp for tx in which audited event occurred';
+COMMENT ON COLUMN historiek.logged_actions.action_tstamp_clk IS 'Wall clock time at which audited event''s trigger call occurred';
+COMMENT ON COLUMN historiek.logged_actions.transaction_id IS 'Identifier of transaction that made the change. May wrap, but unique paired with action_tstamp_tx.';
+COMMENT ON COLUMN historiek.logged_actions.client_addr IS 'IP address of client that issued query. Null for unix domain socket.';
+COMMENT ON COLUMN historiek.logged_actions.client_port IS 'Remote peer IP port address of client that issued query. Undefined for unix socket.';
+COMMENT ON COLUMN historiek.logged_actions.client_query IS 'Top-level query that caused this auditable event. May be more than one statement.';
+COMMENT ON COLUMN historiek.logged_actions.application_name IS 'Application name set when this audit event occurred. Can be changed in-session by client.';
+COMMENT ON COLUMN historiek.logged_actions.action IS 'Action type; I = insert, D = delete, U = update, T = truncate';
+COMMENT ON COLUMN historiek.logged_actions.row_data IS 'Record value. Null for statement-level trigger. For INSERT this is the new tuple. For DELETE and UPDATE it is the old tuple.';
+COMMENT ON COLUMN historiek.logged_actions.changed_fields IS 'New values of fields changed by UPDATE. Null except for row-level UPDATE events.';
+COMMENT ON COLUMN historiek.logged_actions.statement_only IS '''t'' if audit event is from an FOR EACH STATEMENT trigger, ''f'' for FOR EACH ROW';
 
-CREATE INDEX logged_actions_relid_idx ON audit.logged_actions(relid);
-CREATE INDEX logged_actions_action_tstamp_tx_stm_idx ON audit.logged_actions(action_tstamp_stm);
-CREATE INDEX logged_actions_action_idx ON audit.logged_actions(action);
+CREATE INDEX logged_actions_relid_idx ON historiek.logged_actions(relid);
+CREATE INDEX logged_actions_action_tstamp_tx_stm_idx ON historiek.logged_actions(action_tstamp_stm);
+CREATE INDEX logged_actions_action_idx ON historiek.logged_actions(action);
 
-CREATE TABLE audit.logged_relations (
+CREATE TABLE historiek.logged_relations (
     relation_name text not null,
     uid_column text not null,
     PRIMARY KEY (relation_name, uid_column)
 );
 
-COMMENT ON TABLE audit.logged_relations IS 'Table used to store unique identifier columns for table or views, so that events can be replayed';
-COMMENT ON COLUMN audit.logged_relations.relation_name IS 'Relation (table or view) name (with schema if needed)';
-COMMENT ON COLUMN audit.logged_relations.uid_column IS 'Name of a column that is used to uniquely identify a row in the relation';
+COMMENT ON TABLE historiek.logged_relations IS 'Table used to store unique identifier columns for table or views, so that events can be replayed';
+COMMENT ON COLUMN historiek.logged_relations.relation_name IS 'Relation (table or view) name (with schema if needed)';
+COMMENT ON COLUMN historiek.logged_relations.uid_column IS 'Name of a column that is used to uniquely identify a row in the relation';
 
-CREATE OR REPLACE FUNCTION audit.if_modified_func() RETURNS TRIGGER AS $body$
+CREATE OR REPLACE FUNCTION historiek.if_modified_func() RETURNS TRIGGER AS $body$
 DECLARE
-    audit_row audit.logged_actions;
+    audit_row historiek.logged_actions;
     include_values boolean;
     log_diffs boolean;
     h_old hstore;
@@ -102,11 +102,11 @@ DECLARE
     excluded_cols text[] = ARRAY[]::text[];
 BEGIN
     IF NOT (TG_WHEN IN ('AFTER' , 'INSTEAD OF')) THEN
-        RAISE EXCEPTION 'audit.if_modified_func() may only run as an AFTER trigger';
+        RAISE EXCEPTION 'historiek.if_modified_func() may only run as an AFTER trigger';
     END IF;
 
     audit_row = ROW(
-        nextval('audit.logged_actions_event_id_seq'), -- event_id
+        nextval('historiek.logged_actions_event_id_seq'), -- event_id
         TG_TABLE_SCHEMA::text,                        -- schema_name
         TG_TABLE_NAME::text,                          -- table_name
         TG_RELID,                                     -- relation OID for much quicker searches
@@ -142,26 +142,26 @@ BEGIN
             -- All changed fields are ignored. Skip this update.
             RETURN NULL;
         END IF;
-  INSERT INTO audit.logged_actions VALUES (audit_row.*);
+  INSERT INTO historiek.logged_actions VALUES (audit_row.*);
   RETURN NEW;
         
     ELSIF (TG_OP = 'DELETE' AND TG_LEVEL = 'ROW') THEN
         audit_row.row_data = hstore(OLD.*) - excluded_cols;
-  INSERT INTO audit.logged_actions VALUES (audit_row.*);
+  INSERT INTO historiek.logged_actions VALUES (audit_row.*);
         RETURN OLD;
         
     ELSIF (TG_OP = 'INSERT' AND TG_LEVEL = 'ROW') THEN
         audit_row.row_data = hstore(NEW.*) - excluded_cols;
-  INSERT INTO audit.logged_actions VALUES (audit_row.*);
+  INSERT INTO historiek.logged_actions VALUES (audit_row.*);
         RETURN NEW;
 
     ELSIF (TG_LEVEL = 'STATEMENT' AND TG_OP IN ('INSERT','UPDATE','DELETE','TRUNCATE')) THEN
         audit_row.statement_only = 't';
-        INSERT INTO audit.logged_actions VALUES (audit_row.*);
+        INSERT INTO historiek.logged_actions VALUES (audit_row.*);
   RETURN NULL;
 
     ELSE
-        RAISE EXCEPTION '[audit.if_modified_func] - Trigger func added as trigger for unhandled case: %, %',TG_OP, TG_LEVEL;
+        RAISE EXCEPTION '[historiek.if_modified_func] - Trigger func added as trigger for unhandled case: %, %',TG_OP, TG_LEVEL;
         RETURN NEW;
     END IF;
 
@@ -173,7 +173,7 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public;
 
 
-COMMENT ON FUNCTION audit.if_modified_func() IS $body$
+COMMENT ON FUNCTION historiek.if_modified_func() IS $body$
 Track changes to a table at the statement and/or row level.
 
 Optional parameters to trigger in CREATE TRIGGER call:
@@ -206,7 +206,7 @@ $body$;
 
 
 
-CREATE OR REPLACE FUNCTION audit.audit_table(target_table regclass, audit_rows boolean, audit_query_text boolean, ignored_cols text[]) RETURNS void AS $body$
+CREATE OR REPLACE FUNCTION historiek.audit_table(target_table regclass, audit_rows boolean, audit_query_text boolean, ignored_cols text[]) RETURNS void AS $body$
 DECLARE
   stm_targets text = 'INSERT OR UPDATE OR DELETE OR TRUNCATE';
   _q_txt text;
@@ -223,7 +223,7 @@ BEGIN
         END IF;
         _q_txt = 'CREATE TRIGGER audit_trigger_row AFTER INSERT OR UPDATE OR DELETE ON ' || 
                  target_table::TEXT || 
-                 ' FOR EACH ROW EXECUTE PROCEDURE audit.if_modified_func(' ||
+                 ' FOR EACH ROW EXECUTE PROCEDURE historiek.if_modified_func(' ||
                  quote_literal(audit_query_text) || _ignored_cols_snip || ');';
         EXECUTE _q_txt;
         stm_targets = 'TRUNCATE';
@@ -232,12 +232,12 @@ BEGIN
 
     _q_txt = 'CREATE TRIGGER audit_trigger_stm AFTER ' || stm_targets || ' ON ' ||
              target_table ||
-             ' FOR EACH STATEMENT EXECUTE PROCEDURE audit.if_modified_func('||
+             ' FOR EACH STATEMENT EXECUTE PROCEDURE historiek.if_modified_func('||
              quote_literal(audit_query_text) || ');';
     EXECUTE _q_txt;
 
     -- store primary key names
-    insert into audit.logged_relations (relation_name, uid_column)
+    insert into historiek.logged_relations (relation_name, uid_column)
          select target_table, a.attname
            from pg_index i
            join pg_attribute a on a.attrelid = i.indrelid
@@ -249,7 +249,7 @@ END;
 $body$
 language 'plpgsql';
 
-COMMENT ON FUNCTION audit.audit_table(regclass, boolean, boolean, text[]) IS $body$
+COMMENT ON FUNCTION historiek.audit_table(regclass, boolean, boolean, text[]) IS $body$
 Add auditing support to a table.
 
 Arguments:
@@ -260,34 +260,34 @@ Arguments:
 $body$;
 
 -- Pg doesn't allow variadic calls with 0 params, so provide a wrapper
-CREATE OR REPLACE FUNCTION audit.audit_table(target_table regclass, audit_rows boolean, audit_query_text boolean) RETURNS void AS $body$
-SELECT audit.audit_table($1, $2, $3, ARRAY[]::text[]);
+CREATE OR REPLACE FUNCTION historiek.audit_table(target_table regclass, audit_rows boolean, audit_query_text boolean) RETURNS void AS $body$
+SELECT historiek.audit_table($1, $2, $3, ARRAY[]::text[]);
 $body$ LANGUAGE SQL;
 
 -- And provide a convenience call wrapper for the simplest case
 -- of row-level logging with no excluded cols and query logging enabled.
 --
-CREATE OR REPLACE FUNCTION audit.audit_table(target_table regclass) RETURNS void AS $body$
-SELECT audit.audit_table($1, BOOLEAN 't', BOOLEAN 't');
+CREATE OR REPLACE FUNCTION historiek.audit_table(target_table regclass) RETURNS void AS $body$
+SELECT historiek.audit_table($1, BOOLEAN 't', BOOLEAN 't');
 $body$ LANGUAGE 'sql';
 
-COMMENT ON FUNCTION audit.audit_table(regclass) IS $body$
+COMMENT ON FUNCTION historiek.audit_table(regclass) IS $body$
 Add auditing support to the given table. Row-level changes will be logged with full client query text. No cols are ignored.
 $body$;
 
 
-CREATE OR REPLACE FUNCTION audit.replay_event(pevent_id int) RETURNS void AS $body$
+CREATE OR REPLACE FUNCTION historiek.replay_event(pevent_id int) RETURNS void AS $body$
 DECLARE
   query text;
 BEGIN
     with
     event as (
-        select * from audit.logged_actions where event_id = pevent_id
+        select * from historiek.logged_actions where event_id = pevent_id
     )
     -- get primary key names
     , where_pks as (
         select array_to_string(array_agg(uid_column || '=' || quote_literal(row_data->uid_column)), ' AND ') as where_clause
-          from audit.logged_relations r
+          from historiek.logged_relations r
           join event on relation_name = (schema_name || '.' || table_name)
     )
     select into query
@@ -313,9 +313,9 @@ END;
 $body$
 LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION audit.replay_event(int) IS $body$
+COMMENT ON FUNCTION historiek.replay_event(int) IS $body$
 Replay a logged event.
  
 Arguments:
-   pevent_id:  The event_id of the event in audit.logged_actions to replay
+   pevent_id:  The event_id of the event in historiek.logged_actions to replay
 $body$;
